@@ -104,6 +104,8 @@ pub struct Config {
 	///
 	/// Any messages below this level will be excluded from the logs.
 	pub log_level: LogLevel,
+	/// Accept forwards to private channels 
+	pub accept_forwards_to_priv_channels: bool
 }
 
 impl Default for Config {
@@ -120,6 +122,7 @@ impl Default for Config {
 			trusted_peers_0conf: Vec::new(),
 			probing_liquidity_limit_multiplier: DEFAULT_PROBING_LIQUIDITY_LIMIT_MULTIPLIER,
 			log_level: DEFAULT_LOG_LEVEL,
+			accept_forwards_to_priv_channels: false
 		}
 	}
 }

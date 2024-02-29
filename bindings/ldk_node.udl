@@ -15,6 +15,7 @@ dictionary Config {
 	sequence<PublicKey> trusted_peers_0conf;
 	u64 probing_liquidity_limit_multiplier;
 	LogLevel log_level;
+	boolean accept_forwards_to_priv_channels;
 };
 
 interface Builder {
@@ -83,6 +84,10 @@ interface LDKNode {
 	Bolt11Invoice receive_payment(u64 amount_msat, [ByRef]string description, u32 expiry_secs);
 	[Throws=NodeError]
 	Bolt11Invoice receive_variable_amount_payment([ByRef]string description, u32 expiry_secs);
+	[Throws=NodeError]
+	Bolt11Invoice receive_payment_with_paths(u64 amount_msat, [ByRef]string description, u32 expiry_secs, sequence<ChannelId> route_hints);
+	[Throws=NodeError]
+	Bolt11Invoice receive_variable_amount_payment_with_paths([ByRef]string description, u32 expiry_secs, sequence<ChannelId> route_hints);
 	[Throws=NodeError]
 	Bolt11Invoice receive_payment_via_jit_channel(u64 amount_msat, [ByRef]string description, u32 expiry_secs, u64? max_lsp_fee_limit_msat);
 	[Throws=NodeError]

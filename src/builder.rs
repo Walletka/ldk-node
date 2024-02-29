@@ -296,6 +296,11 @@ impl NodeBuilder {
 		self
 	}
 
+	/// Sets accept_forwards_to_priv_channels 
+	pub fn set_acc(&mut self, accept: bool) -> &mut Self {
+		self
+	}
+
 	/// Builds a [`Node`] instance with a [`SqliteStore`] backend and according to the options
 	/// previously configured.
 	pub fn build(&self) -> Result<Node<SqliteStore>, BuildError> {
@@ -688,6 +693,7 @@ fn build_with_store_internal<K: KVStore + Sync + Send + 'static>(
 	// Initialize the ChannelManager
 	let mut user_config = UserConfig::default();
 	user_config.channel_handshake_limits.force_announced_channel_preference = false;
+	user_config.accept_forwards_to_priv_channels = config.accept_forwards_to_priv_channels;
 
 	if !config.trusted_peers_0conf.is_empty() {
 		// Manually accept inbound channels if we expect 0conf channel requests, avoid

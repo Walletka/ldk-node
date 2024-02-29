@@ -98,6 +98,7 @@ mod wallet;
 
 pub use bip39;
 pub use bitcoin;
+use bitcoin::key::Secp256k1;
 pub use lightning;
 pub use lightning_invoice;
 
@@ -139,9 +140,11 @@ pub use types::{ChannelDetails, PeerDetails, UserChannelId};
 use logger::{log_error, log_info, log_trace, FilesystemLogger, Logger};
 
 use lightning::chain::Confirm;
-use lightning::ln::channelmanager::{self, PaymentId, RecipientOnionFields, Retry};
+use lightning::ln::channelmanager::{
+	self, PaymentId, RecipientOnionFields, Retry, MIN_FINAL_CLTV_EXPIRY_DELTA,
+};
 use lightning::ln::msgs::SocketAddress;
-use lightning::ln::{PaymentHash, PaymentPreimage};
+use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage};
 
 use lightning::sign::EntropySource;
 
@@ -155,9 +158,11 @@ use lightning_background_processor::process_events_async;
 use lightning_transaction_sync::EsploraSyncClient;
 
 use lightning::routing::router::{PaymentParameters, RouteParameters};
-use lightning_invoice::{payment, Bolt11Invoice, Currency};
+use lightning_invoice::{
+	payment, Bolt11Invoice, Currency, InvoiceBuilder, RouteHint, RouteHintHop, RoutingFees,
+};
 
-use bitcoin::hashes::sha256::Hash as Sha256;
+use bitcoin::hashes::sha256::{self, Hash as Sha256};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 
@@ -1434,6 +1439,27 @@ impl<K: KVStore + Sync + Send + 'static> Node<K> {
 		self.receive_payment_inner(None, description, expiry_secs)
 	}
 
+	/// Returns a payable invoice that can be used to request and receive a payment of the amount
+	/// given.
+	pub fn receive_payment_with_paths(
+		&self, amount_msat: u64, description: &str, expiry_secs: u32, route_hints: Vec<ChannelId>,
+	) -> Result<Bolt11Invoice, Error> {
+		self.receive_payment_with_paths_inner(
+			Some(amount_msat),
+			description,
+			expiry_secs,
+			route_hints,
+		)
+	}
+
+	/// Returns a payable invoice that can be used to request and receive a payment for which the
+	/// amount is to be determined by the user, also known as a "zero-amount" invoice.
+	pub fn receive_variable_amount_payment_with_paths(
+		&self, description: &str, expiry_secs: u32, route_hints: Vec<ChannelId>,
+	) -> Result<Bolt11Invoice, Error> {
+		self.receive_payment_with_paths_inner(None, description, expiry_secs, route_hints)
+	}
+
 	fn receive_payment_inner(
 		&self, amount_msat: Option<u64>, description: &str, expiry_secs: u32,
 	) -> Result<Bolt11Invoice, Error> {
@@ -1473,6 +1499,76 @@ impl<K: KVStore + Sync + Send + 'static> Node<K> {
 		self.payment_store.insert(payment)?;
 
 		Ok(invoice)
+	}
+
+	fn receive_payment_with_paths_inner(
+		&self, amount_msat: Option<u64>, description: &str, expiry_secs: u32,
+		route_hints: Vec<ChannelId>,
+	) -> Result<Bolt11Invoice, Error> {
+		// LSPS2 requires min_final_cltv_expiry_delta to be at least 2 more than usual.
+		let min_final_cltv_expiry_delta = MIN_FINAL_CLTV_EXPIRY_DELTA + 2;
+		let (payment_hash, payment_secret) = self
+			.channel_manager
+			.create_inbound_payment(None, expiry_secs, Some(min_final_cltv_expiry_delta))
+			.map_err(|e| {
+				log_error!(self.logger, "Failed to register inbound payment: {:?}", e);
+				Error::InvoiceCreationFailed
+			})?;
+
+		let payment_hash = sha256::Hash::from_slice(&payment_hash.0).map_err(|e| {
+			log_error!(self.logger, "Invalid payment hash: {:?}", e);
+			Error::InvoiceCreationFailed
+		})?;
+
+		let currency = self.config.network.into();
+		let mut invoice_builder = InvoiceBuilder::new(currency)
+			.description(description.to_string())
+			.payment_hash(payment_hash)
+			.payment_secret(payment_secret)
+			.current_timestamp()
+			.min_final_cltv_expiry_delta(min_final_cltv_expiry_delta.into())
+			.expiry_time(Duration::from_secs(expiry_secs.into()));
+
+		let channels = self.channel_manager.list_usable_channels();
+
+		for channel_id in route_hints {
+			let channel = match channels.iter().find(|c| c.channel_id == channel_id) {
+				Some(channel) => channel,
+				None => {
+					continue;
+				},
+			};
+
+			let channel_config = channel.config.unwrap();
+
+			let route_hint = RouteHint(vec![RouteHintHop {
+				src_node_id: channel.counterparty.node_id,
+				short_channel_id: channel.short_channel_id.unwrap(),
+				fees: RoutingFees {
+					base_msat: channel_config.forwarding_fee_base_msat,
+					proportional_millionths: channel_config.forwarding_fee_proportional_millionths,
+				},
+				cltv_expiry_delta: channel.config.unwrap().cltv_expiry_delta + 8,
+				htlc_minimum_msat: channel.inbound_htlc_minimum_msat,
+				htlc_maximum_msat: channel.inbound_htlc_maximum_msat,
+			}]);
+
+			invoice_builder = invoice_builder.private_route(route_hint);
+		}
+
+		if let Some(amount_msat) = amount_msat {
+			invoice_builder = invoice_builder.amount_milli_satoshis(amount_msat).basic_mpp();
+		}
+
+		invoice_builder
+			.build_signed(|hash| {
+				Secp256k1::new()
+					.sign_ecdsa_recoverable(hash, &self.keys_manager.get_node_secret_key())
+			})
+			.map_err(|e| {
+				log_error!(self.logger, "Failed to build and sign invoice: {}", e);
+				Error::InvoiceCreationFailed
+			})
 	}
 
 	/// Returns a payable invoice that can be used to request a payment of the amount given and
