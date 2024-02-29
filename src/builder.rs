@@ -296,8 +296,9 @@ impl NodeBuilder {
 		self
 	}
 
-	/// Sets accept_forwards_to_priv_channels 
-	pub fn set_acc(&mut self, accept: bool) -> &mut Self {
+	/// Sets accept_forwards_to_priv_channels
+	pub fn set_accept_forwards_to_private_channels(&mut self, accept: bool) -> &mut Self {
+		self.config.accept_forwards_to_priv_channels = accept;
 		self
 	}
 
