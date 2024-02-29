@@ -503,6 +503,11 @@ impl ArcedNodeBuilder {
 		self.inner.write().unwrap().set_log_level(level);
 	}
 
+	/// Sets accept_forwards_to_priv_channels
+	pub fn set_accept_forwards_to_private_channels(&self, accept: bool) {
+		self.inner.write().unwrap().set_accept_forwards_to_private_channels(accept);
+	}
+
 	/// Builds a [`Node`] instance with a [`SqliteStore`] backend and according to the options
 	/// previously configured.
 	pub fn build(&self) -> Result<Arc<Node<SqliteStore>>, BuildError> {
